@@ -1,94 +1,134 @@
-name: Build KernelSU Next
+############################################
+### GitHub Action 自动化内核构建流程说明 ###
+############################################
+
+name: Build KernelSU Next  # 工作流名称：构建 KernelSU Next 内核
 on:
-  workflow_dispatch:
-    inputs:
-      CPU:
+  workflow_dispatch:        # 手动触发工作流
+    inputs:                 # 用户输入参数配置
+      CPU:                  # 参数1：内核分支
         description: "分支"
         required: true
-        default: 'sm7675'
-      FEIL:
+        default: 'sm7675'   # 默认分支名称
+      FEIL:                 # 参数2：配置文件
         description: "配置文件"
         required: true
-        default: 'oneplus_ace_3v_v'
-      CPUD:
+        default: 'oneplus_ace_3v_v'  # 默认配置文件
+      CPUD:                 # 参数3：处理器代号
         description: "处理器代号"
         required: true
-        default: 'pineapple'
+        default: 'pineapple' # 默认处理器代号
 
 jobs:
-  build:
-   runs-on: ubuntu-latest
+  build:                    # 定义名为 build 的作业
+   runs-on: ubuntu-latest   # 运行在最新版 Ubuntu 环境
 
-   steps:
+   steps:                   # 以下是构建流程的具体步骤
+     # 步骤1：检出代码仓库
      - name: Check Out
-       uses: actions/checkout@v3
-       
-     - name: Cleanup
-       uses: rokibhasansagar/slimhub_actions@main
+       uses: actions/checkout@v3  # 使用官方检出动作
 
+     # 步骤2：清理仓库残留文件
+     - name: Cleanup
+       uses: rokibhasansagar/slimhub_actions@main  # 第三方清理工具
+
+     # 步骤3：配置Git用户信息（用于后续提交操作）
      - name: Configure Git
        run: |
-        git config --global user.name "wuua"
-        git config --global user.email "3436678798@qq.com"
+        git config --global user.name "Mifengtong"           # 设置全局用户名
+        git config --global user.email "3335310963@qq.com" # 设置全局邮箱
 
+     # 步骤4：清理磁盘空间（避免存储不足导致构建失败）
      - name: Clean up disk space
        run: |
-        sudo apt-get clean
-        sudo rm -rf /usr/share/dotnet /etc/mysql /var/lib/mysql
-        sudo rm -rf /usr/local/lib/android
-        df -h
-        
+        sudo apt-get clean          # 清理APT缓存
+        sudo rm -rf /usr/share/dotnet /etc/mysql /var/lib/mysql  # 删除不需要的软件
+        sudo rm -rf /usr/local/lib/android  # 删除Android SDK
+        df -h                       # 显示磁盘使用情况
+
+     # 步骤5：安装系统依赖
      - name: Install dependencies
        run: |
-        sudo apt update && sudo apt upgrade -y
-        sudo apt install -y python3 git curl
+        sudo apt update && sudo apt upgrade -y  # 更新软件包列表
+        sudo apt install -y python3 git curl    # 安装核心工具链
 
+     # 步骤6：安装Android repo工具
      - name: Install repo tool
        run: |
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
-        chmod a+x ~/repo
-        sudo mv ~/repo /usr/local/bin/repo
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo  # 下载repo工具
+        chmod a+x ~/repo          # 添加执行权限
+        sudo mv ~/repo /usr/local/bin/repo  # 移动至系统路径
 
+     # 步骤7：初始化内核仓库并同步代码
      - name: Initialize repo and sync
        run: |
-        mkdir kernel_workspace && cd kernel_workspace
-        repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
-        repo sync
+        mkdir kernel_workspace && cd kernel_workspace  # 创建工作目录
+        # 初始化OnePlus内核仓库
+        repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
+          -b refs/heads/oneplus/${{ github.event.inputs.CPU }} \
+          -m ${{ github.event.inputs.FEIL }}.xml \
+          --depth=1
+        repo sync                   # 同步代码仓库
+        # 清理保护性导出文件
         rm kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
         rm kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
+        # 修改版本标识（添加自定义后缀）
         sed -i '$s|echo "\$res"|echo "-OKI-EdogawaX"|' kernel_platform/common/scripts/setlocalversion
         sed -i '$s|echo "\$res"|echo "-OKI-EdogawaX"|' kernel_platform/msm-kernel/scripts/setlocalversion
 
+     # 步骤8：验证repo同步结果（新增关键检查点）
+     - name: Verify repo sync output
+       run: |
+        cd kernel_workspace
+        ls -l kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/  # 列出预期输出目录
 
+     # 步骤9：设置KernelSU模块
      - name: Set up KernelSU
        run: |
         cd kernel_workspace/kernel_platform
+        # 下载并执行KernelSU安装脚本
         curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next-susfs
         cd KernelSU-Next
+        # 生成版本号（基于提交次数计算）
         KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
-        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV  # 注入环境变量
+        # 更新Makefile中的版本号
         sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
         
+     # 步骤10：编译内核
      - name: Build kernel
        run: |
         cd kernel_workspace
+        # 执行OnePlus官方构建脚本
         ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ github.event.inputs.CPUD }} gki
 
+     # 步骤11：验证内核编译输出（新增关键检查点）
+     - name: Verify kernel build output
+       run: |
+        cd kernel_workspace
+        find . -name "Image" -ls  # 搜索生成的Image文件
+        # 强制检查文件存在性（不存在则报错）
+        test -f kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/Image
+
+     # 步骤12：制作AnyKernel3刷机包
      - name: Make AnyKernel3
        run: |
-        git clone https://github.com/Kernel-SU/AnyKernel3 --depth=1
-        rm -rf ./AnyKernel3/.git
-        cp kernel_workspace/kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/Image ./AnyKernel3/
+        git clone https://github.com/Kernel-SU/AnyKernel3 --depth=1  # 克隆打包工具
+        rm -rf ./AnyKernel3/.git      # 删除.git目录避免冲突
+        # 动态查找Image文件路径（解决路径不一致问题）
+        IMAGE_PATH=$(find kernel_workspace -name "Image" | head -n1)
+        cp "$IMAGE_PATH" ./AnyKernel3/  # 复制内核镜像到打包目录
 
+     # 步骤13：上传AnyKernel3产物
      - name: Upload AnyKernel3
        uses: actions/upload-artifact@v4
        with:
         name: AnyKernel3_KernelSU_Next_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}
         path: ./AnyKernel3/*
 
+     # 步骤14：上传boot.img镜像
      - name: Upload boot.img
        uses: actions/upload-artifact@v4
        with:
         name: boot_KernelSU_Next_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}
         path: kernel_workspace/kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/boot.img
-
