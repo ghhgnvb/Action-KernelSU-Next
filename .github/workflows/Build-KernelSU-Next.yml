@@ -73,8 +73,10 @@ jobs:
         rm kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
         rm kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
         # 修改版本标识（添加自定义后缀）
-        sed -i '$s|echo "\$res"|echo "-OKI-EdogawaX"|' kernel_platform/common/scripts/setlocalversion
-        sed -i '$s|echo "\$res"|echo "-OKI-EdogawaX"|' kernel_platform/msm-kernel/scripts/setlocalversion
+        sed -i 's|^echo "\$res"$|echo "-OKI-EdogawaX"|' kernel_platform/common/scripts/setlocalversion
+        sed -i 's|^echo "\$res"$|echo "-OKI-EdogawaX"|' kernel_platform/msm-kernel/scripts/setlocalversion
+
+
 
      # 步骤8：验证repo同步结果（新增关键检查点）
      - name: Verify repo sync output
